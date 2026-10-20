@@ -107,6 +107,12 @@ button,input{font:inherit;color:inherit}
 #aq{position:fixed;top:0;right:0;bottom:0;width:min(620px,100vw);z-index:6;overflow:auto;overscroll-behavior:contain;
   container-type:inline-size;box-shadow:-8px 0 30px rgba(20,40,55,.25);padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 #aq[hidden]{display:none}
+/* keep the top-right buttons reachable while the air/noise or water drawer is open */
+@media (min-width:900px){body:has(#aq:not([hidden])) #ctl,body:has(#wl:not([hidden])) #ctl{right:calc(min(620px,100vw) + 12px)}}
+@media (max-width:899px){
+  body:has(#aq:not([hidden])) #ctl,body:has(#wl:not([hidden])) #ctl{z-index:7;top:calc(10px + env(safe-area-inset-top,0px))}
+  #aq,#wl{top:calc(56px + env(safe-area-inset-top,0px))!important;padding-top:0!important}
+}
 #aq main{padding-top:6px}
 #aq .aqbar{position:sticky;top:0;z-index:2;display:flex;justify-content:flex-end;padding:8px 10px 0;pointer-events:none}
 #aq-close{pointer-events:auto;width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--text);font-size:20px;line-height:1;cursor:pointer}
@@ -265,7 +271,7 @@ button,input{font:inherit;color:inherit}
     <h3 data-t="looks"></h3>
     <div class="looks" id="looks"></div>
     <label><input type="checkbox" id="hills"><span data-t="hills"></span></label>
-    <label><input type="checkbox" id="threeD"><span data-t="threeD"></span></label>
+    <label><input type="checkbox" id="threeD" checked><span data-t="threeD"></span></label>
     <label><input type="checkbox" id="showStations" checked><span data-t="stations"></span></label>
     <label><input type="checkbox" id="showWater" checked><span data-t="showWater"></span></label>
     <label><input type="checkbox" id="photo"><span data-t="photo"></span></label>
@@ -366,7 +372,7 @@ const OVERPASS = ["https://overpass-api.de/api/interpreter","https://overpass.ku
 const AREA = 'area["name"="Stockholms kommun"]["admin_level"="7"]->.a;';
 const BOUNDS = {s:59.225, w:17.76, n:59.43, e:18.20};   // Stockholm municipality, loosely
 const GRID = 4;                                          // 4×4 chunks, loaded centre-first
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 4;
 const LOOKS = {
   liberty:  "https://tiles.openfreemap.org/styles/liberty",
   positron: "https://tiles.openfreemap.org/styles/positron",
@@ -429,7 +435,7 @@ const T = {
 };
 
 const S = {lang:(navigator.language||"en").startsWith("sv")?"sv":"en", look:"positron", year:NOW, minYear:1250,
-           hills:false, threeD:false, photo:false, unknown:true, sel:null, playing:false, loading:false, savedOn:null};
+           hills:false, threeD:true, photo:false, unknown:true, sel:null, playing:false, loading:false, savedOn:null};
 let FC = {type:"FeatureCollection",features:[]}, WIKI = {}, SUMM = {}, BYID = new Map(), INDEX = [], COUNTS = null, styleReady = false;
 const $ = id => document.getElementById(id);
 const t = (k,v={}) => (T[S.lang][k] ?? k).replace(/\{(\w)\}/g,(_,x)=>v[x]!==undefined?(typeof v[x]==="number"?v[x].toLocaleString(S.lang==="sv"?"sv-SE":"en-GB"):v[x]):"");
@@ -445,13 +451,14 @@ function colorFor(y){ if(!y) return UNKNOWN; for(let i=1;i<RAMP.length;i++) if(y
 const colorExpr = () => ["case",["has","y"],["interpolate",["linear"],["get","y"],...RAMP.flat()],UNKNOWN];
 
 /* ---------- map ---------- */
-const map = new maplibregl.Map({container:"map", style:LOOKS[S.look], center:[18.0700,59.3300], zoom:14.4, hash:true, maxPitch:75, attributionControl:{compact:true}});
+const map = new maplibregl.Map({container:"map", style:LOOKS[S.look], center:[18.0700,59.3300], zoom:14.4, pitch:55, hash:true, maxPitch:75, attributionControl:{compact:true}});
 map.addControl(new maplibregl.NavigationControl({visualizePitch:true}),"bottom-right");
 map.on("style.load", () => {
   styleReady=true;
   for(const l of map.getStyle().layers) if(l["source-layer"]==="building") map.setLayoutProperty(l.id,"visibility","none");
   addLayers();
 });
+map.once("load", () => { if(S.threeD && map.getPitch()<1) map.easeTo({pitch:55,duration:900}); });   // a #zoom/lat/lng link without pitch opens flat
 function firstSymbol(){ return map.getStyle().layers.find(l=>l.type==="symbol")?.id; }
 /* Buildings are drawn as fixed time slices (one layer per period). Moving the timeline only switches slices on
    or off through their opacity, which MapLibre can do instantly. Changing a filter would make it rebuild every
@@ -572,24 +579,56 @@ function closeCard(){ S.sel=null; highlight(null); $("card").classList.remove("o
 /* ---------- search ---------- */
 function buildIndex(){
   INDEX = FC.features.map(f => { const p=f.properties, w=p.q&&WIKI[p.q];
-    const text=[p.n,p.a,...(p.in||[]),w?.en,w?.sv].filter(Boolean).join(" | ");
-    return text ? {id:p.i, text, low:text.toLowerCase()} : null; }).filter(Boolean);
+    const text=[p.n,p.a,...(p.al||[]),...(p.in||[]),w?.en,w?.sv].filter(Boolean).join(" | ");
+    return text ? {id:p.i, text, low:norm(text)} : null; }).filter(Boolean);
 }
+function norm(s){ return s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,""); }   // "sodermalm" finds Södermalm
+function hasAll(s,words){ const n=norm(s); return words.every(w=>n.includes(w)); }
 function search(q){
-  q=q.trim().toLowerCase(); const ul=$("results"); ul.innerHTML="";
-  if(q.length<2) return;
-  const hits=[]; for(const r of INDEX){ const k=r.low.indexOf(q); if(k>=0){ hits.push([k===0?0:r.low[k-1]===" "?1:2, r]); if(hits.length>400) break; } }
+  const ul=$("results"); ul.innerHTML="";
+  const words=norm(q.trim()).split(/\s+/).filter(Boolean), q1=words.join(" ");
+  if(q1.length<2) return;
+  const hits=[]; for(const r of INDEX){ if(!words.every(w=>r.low.includes(w))) continue;
+    const k=r.low.indexOf(q1), j=k>=0?k:r.low.indexOf(words[0]); hits.push([(k>=0?0:3)+(j===0?0:r.low[j-1]===" "?1:2), r]); }
   hits.sort((a,b)=>a[0]-b[0]||a[1].text.length-b[1].text.length);
-  if(!hits.length){ ul.innerHTML=`<li><small style="padding:7px 8px">${t("noResults")}</small></li>`; return; }
-  for(const [,r] of hits.slice(0,8)){
-    const p=BYID.get(r.id), main=p.n||p.a||r.text.split(" | ")[0];
-    const sub=[p.n?p.a:null, p.in?.find(x=>x.toLowerCase().includes(q))].filter(Boolean).join(", ");
+  const shown=new Set(hits.slice(0,30).map(([,r])=>r.id));
+  geoSearch(q, words, shown);
+  if(!hits.length){ ul.innerHTML=`<li class="nores"><small style="padding:7px 8px">${t("noResults")}</small></li>`; return; }
+  for(const [,r] of hits.slice(0,30)){
+    const p=BYID.get(r.id), addr=[p.a,...(p.al||[])].filter(Boolean), hitAddr=addr.find(a=>hasAll(a,words));
+    const main=p.n||hitAddr||p.a||r.text.split(" | ")[0];
+    const sub=[p.n?(hitAddr||p.a):null, p.in?.find(x=>hasAll(x,words))].filter(Boolean).join(", ");
     const li=document.createElement("li");
     li.innerHTML=`<button role="option"><span class="yr">${p.y||"–"}</span>${esc(main)}${sub?`<small>${esc(sub)}</small>`:""}</button>`;
     li.firstChild.onclick=()=>{ ul.innerHTML=""; if(p.y && p.y>S.year) setYear(NOW);
       map.flyTo({center:[p.cx,p.cy],zoom:17.2,essential:true}); openCard(r.id); };
     ul.appendChild(li);
   }
+}
+/* addresses the loaded buildings don't know (not downloaded yet, or not mapped on a building): ask OpenStreetMap's geocoder */
+let geoCtl=null, geoTimer=null; const GEO={};
+function geoSearch(q, words, shown){
+  clearTimeout(geoTimer); geoCtl?.abort();
+  const key=q.trim().toLowerCase(); if(key.length<3) return;
+  geoTimer=setTimeout(async()=>{               // debounced: Nominatim allows about one request a second
+    let rows=GEO[key];
+    if(!rows){ geoCtl=new AbortController();
+      try{ const u="https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=8&countrycodes=se&bounded=1"
+             +"&viewbox="+[BOUNDS.w,BOUNDS.n,BOUNDS.e,BOUNDS.s].join(",")+"&accept-language="+S.lang+"&q="+encodeURIComponent(q.trim());
+           rows=GEO[key]=await (await fetch(u,{signal:geoCtl.signal})).json(); }catch{ return; } }
+    if($("q").value.trim().toLowerCase()!==key) return;
+    const ul=$("results");
+    for(const g of rows){ const ad=g.address||{}, x=+g.lon, y=+g.lat, f=featureAt(x,y);
+      if(f && shown.has(f.properties.i)) continue; if(f) shown.add(f.properties.i);
+      const main=[ad.road||ad.pedestrian||ad.footway||g.name, ad.house_number].filter(Boolean).join(" ")||g.display_name.split(",")[0];
+      const sub=[g.name&&g.name!==main?g.name:null, ad.suburb||ad.city_district||ad.quarter, ad.postcode].filter(Boolean).join(", ");
+      const li=document.createElement("li");
+      li.innerHTML=`<button role="option"><span class="yr" aria-hidden="true">📍</span>${esc(main)}${sub?`<small>${esc(sub)}</small>`:""}</button>`;
+      li.firstChild.onclick=()=>{ ul.innerHTML=""; map.flyTo({center:[x,y],zoom:17.6,essential:true});
+        const b=featureAt(x,y)?.properties; if(b){ if(b.y && b.y>S.year) setYear(NOW); openCard(b.i); } };
+      ul.querySelector(".nores")?.remove(); ul.appendChild(li);
+    }
+  },450);
 }
 let st; $("q").addEventListener("input",e=>{clearTimeout(st);st=setTimeout(()=>search(e.target.value),120);});
 $("q").addEventListener("keydown",e=>{ if(e.key==="Enter") $("results").querySelector("button")?.click(); if(e.key==="Escape"){e.target.value="";$("results").innerHTML="";} });
@@ -777,10 +816,13 @@ function refreshSoon(force){ if(force || Date.now()-lastRefresh>10000){ lastRefr
 
 function matchPlaces(els){
   for(const el of els){
-    const x=el.lon??el.center?.lon, y=el.lat??el.center?.lat, name=el.tags?.name; if(x==null||!name) continue;
+    const tg=el.tags||{}, x=el.lon??el.center?.lon, y=el.lat??el.center?.lat; if(x==null) continue;
     const f=featureAt(x,y); if(!f) continue;
-    const p=f.properties;
-    if(name!==p.n){ p.in=p.in||[]; if(!p.in.includes(name) && p.in.length<12) p.in.push(name); }
+    const p=f.properties, name=PLACE_KEYS.some(k=>tg[k])?tg.name:null;
+    if(name && name!==p.n){ p.in=p.in||[]; if(!p.in.includes(name) && p.in.length<12) p.in.push(name); }
+    // Stockholm mostly maps addresses as separate points inside the building, not on the building itself
+    if(tg["addr:street"] && tg["addr:housenumber"]){ const a=tg["addr:street"]+" "+tg["addr:housenumber"];
+      if(!p.a) p.a=a; else if(a!==p.a){ p.al=p.al||[]; if(!p.al.includes(a) && p.al.length<20) p.al.push(a); } }
   }
 }
 const WD_TRIED=new Set();
@@ -822,7 +864,7 @@ async function download(restart){
     const m=map.getCenter(); todo.sort((a,b)=>Math.hypot(a.cx-m.lng,(a.cy-m.lat)*2)-Math.hypot(b.cx-m.lng,(b.cy-m.lat)*2));
     const batch=todo.splice(0,CELLS_PER_REQUEST);
     const q=`[out:json][timeout:90];(${batch.map(c=>`way["building"](${c.bb});relation["building"]["type"="multipolygon"](${c.bb});`).join("")});out tags geom;`
-           +`(${batch.map(c=>PLACE_KEYS.map(k=>`nwr["name"]["${k}"](${c.bb});`).join("")).join("")});out center tags;`;
+           +`(${batch.map(c=>PLACE_KEYS.map(k=>`nwr["name"]["${k}"](${c.bb});`).join("")+`node["addr:street"]["addr:housenumber"](${c.bb});`).join("")});out center tags;`;
     try{
       const j=await overpass(q);
       const fresh=[], places=[];
