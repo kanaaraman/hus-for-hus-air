@@ -389,7 +389,7 @@ const T = {
     showUnknown:"Show buildings with no known year",unknownYear:"Year unknown",building:"Building",
     src_osm:"Year from OpenStreetMap",src_wd:"Year from Wikidata",src_none:"No source has a year for this building yet",
     inside:"Inside:",wrong:"Something wrong?",osm:"View on OpenStreetMap",wiki:"Read more on Wikipedia",play:"Play",pause:"Pause",
-    buildings:"buildings",shown:"shown",noResults:"No matches",close:"Close",
+    buildings:"buildings",shown:"shown",noResults:"No matches",noNumber:"Number {a} isn't in OpenStreetMap yet, showing the street",close:"Close",
     data:"Data",dataFrom:"Saved on this device from",dataNone:"Not saved yet",refresh:"Download fresh data",
     loadingView:"Loading the buildings in view…",loadingRest:"loading the rest of the city {a}%",busyRetry:"OpenStreetMap is busy. Trying again…",
     withYear:"{a}% have a known year",partial2:"{n} buildings loaded. Some areas didn’t answer; they’ll be retried next time you open the page.",
@@ -413,7 +413,7 @@ const T = {
     showUnknown:"Visa byggnader utan känt byggår",unknownYear:"Okänt byggår",building:"Byggnad",
     src_osm:"Byggår från OpenStreetMap",src_wd:"Byggår från Wikidata",src_none:"Ingen källa har ett byggår för den här byggnaden än",
     inside:"Här finns:",wrong:"Något fel?",osm:"Visa på OpenStreetMap",wiki:"Läs mer på Wikipedia",play:"Spela",pause:"Pausa",
-    buildings:"byggnader",shown:"visas",noResults:"Inga träffar",close:"Stäng",
+    buildings:"byggnader",shown:"visas",noResults:"Inga träffar",noNumber:"Nummer {a} finns inte i OpenStreetMap än, visar gatan",close:"Stäng",
     data:"Data",dataFrom:"Sparad på den här enheten från",dataNone:"Inte sparad än",refresh:"Hämta ny data",
     loadingView:"Laddar byggnaderna i vyn…",loadingRest:"laddar resten av staden {a}%",busyRetry:"OpenStreetMap är upptagen. Försöker igen…",
     withYear:"{a}% har känt byggår",partial2:"{n} byggnader laddade. Vissa områden svarade inte; de provas igen nästa gång du öppnar sidan.",
@@ -474,7 +474,7 @@ const yearF=()=>["all", S.unknown ? ["<=",["coalesce",["get","y"],-1],S.year] : 
 const BLAYERS=()=>["b-u",...SLICES.map(s=>s.id),"b-edge"];
 function addLayers(){
   if(!styleReady || map.getSource("b")) return;
-  map.addSource("b",{type:"geojson",data:FC,attribution:"Buildings © OpenStreetMap contributors · Wikidata · Wikipedia"});
+  map.addSource("b",{type:"geojson",data:FC,maxzoom:16,attribution:"Buildings © OpenStreetMap contributors · Wikidata · Wikipedia"});
   const before=firstSymbol(), fillPaint=o=>({"fill-color":colorExpr(),"fill-opacity":o,"fill-outline-color":"rgba(0,0,0,.15)"});
   map.addLayer({id:"b-u",type:"fill",source:"b",filter:["all",["!",["has","y"]],...photoF()],paint:{...fillPaint(0),"fill-color":UNKNOWN}},before);
   for(const sl of SLICES) map.addLayer({id:sl.id,type:"fill",source:"b",filter:sliceF(sl),paint:fillPaint(0)},before);
@@ -513,6 +513,8 @@ function applyYear(now){           // called on every slider move: opacity only
 function applyMode(){
   if(!map.getLayer("b-u")) return;
   map.setLayoutProperty("b-3d","visibility",S.threeD?"visible":"none");
+  // transparent layers still get built for every tile, so switch the flat slices off entirely in 3D
+  for(const id of BLAYERS()) map.setLayoutProperty(id,"visibility",S.threeD?"none":"visible");
   if(S.threeD) map.setFilter("b-3d",yearF());
   applyYear(true);
 }
@@ -617,13 +619,16 @@ function geoSearch(q, words, shown){
              +"&viewbox="+[BOUNDS.w,BOUNDS.n,BOUNDS.e,BOUNDS.s].join(",")+"&accept-language="+S.lang+"&q="+encodeURIComponent(q.trim());
            rows=GEO[key]=await (await fetch(u,{signal:geoCtl.signal})).json(); }catch{ return; } }
     if($("q").value.trim().toLowerCase()!==key) return;
-    const ul=$("results");
+    const ul=$("results"), labels=new Set(), num=/\b(\d+\s?[a-z]?)\s*$/i.exec(q.trim())?.[1];
     for(const g of rows){ const ad=g.address||{}, x=+g.lon, y=+g.lat, f=featureAt(x,y);
-      if(f && shown.has(f.properties.i)) continue; if(f) shown.add(f.properties.i);
-      const main=[ad.road||ad.pedestrian||ad.footway||g.name, ad.house_number].filter(Boolean).join(" ")||g.display_name.split(",")[0];
-      const sub=[g.name&&g.name!==main?g.name:null, ad.suburb||ad.city_district||ad.quarter, ad.postcode].filter(Boolean).join(", ");
+      if(f && shown.has(f.properties.i)) continue;
+      const road=ad.road||ad.pedestrian||ad.footway, main=[road||g.name, ad.house_number].filter(Boolean).join(" ")||g.display_name.split(",")[0];
+      const sub=[g.name&&g.name!==main?g.name:null, ad.suburb||ad.city_district||ad.quarter||ad.municipality].filter(Boolean).join(", ");
+      if(labels.has(main+"|"+sub)) continue;      // a street comes back as one result per piece of road
+      labels.add(main+"|"+sub); if(f) shown.add(f.properties.i);
+      const note=num && road && !ad.house_number ? t("noNumber",{a:num}) : "";
       const li=document.createElement("li");
-      li.innerHTML=`<button role="option"><span class="yr" aria-hidden="true">📍</span>${esc(main)}${sub?`<small>${esc(sub)}</small>`:""}</button>`;
+      li.innerHTML=`<button role="option"><span class="yr" aria-hidden="true">📍</span>${esc(main)}${sub?`<small>${esc(sub)}</small>`:""}${note?`<small>${esc(note)}</small>`:""}</button>`;
       li.firstChild.onclick=()=>{ ul.innerHTML=""; map.flyTo({center:[x,y],zoom:17.6,essential:true});
         const b=featureAt(x,y)?.properties; if(b){ if(b.y && b.y>S.year) setYear(NOW); openCard(b.i); } };
       ul.querySelector(".nores")?.remove(); ul.appendChild(li);
@@ -725,14 +730,17 @@ function toast(msg,ms){ const el=$("toast"); clearTimeout(toastTimer); el.textCo
 /* ================= data: OpenStreetMap → buildings, in the browser ================= */
 async function overpass(q){
   let err;
-  for(const url of OVERPASS) for(let attempt=0; attempt<3; attempt++){
-    try{
-      const r = await fetch(url,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"data="+encodeURIComponent(q)});
-      if(r.ok) return await r.json();
-      err = new Error("HTTP "+r.status);
-      if(r.status===400) break;
-    }catch(e){ err=e; }
-    await sleep(6000*(attempt+1));
+  // one server after the other, each with a time limit: a hung server used to stall loading for minutes
+  for(let attempt=0; attempt<3; attempt++){
+    for(const url of OVERPASS){
+      try{
+        const r = await fetch(url,{method:"POST",signal:AbortSignal.timeout(45000),headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"data="+encodeURIComponent(q)});
+        if(r.ok) return await r.json();
+        err = new Error("HTTP "+r.status);
+        if(r.status===400) throw err;
+      }catch(e){ err=e; if(e.message==="HTTP 400") throw e; }
+    }
+    await sleep(4000*(attempt+1));
   }
   throw err;
 }
@@ -812,7 +820,8 @@ function featureAt(x,y){
 function addFeature(f){ if(!f || BYID.has(f.properties.i)) return false; BYID.set(f.properties.i,f.properties); FC.features.push(f); pipAdd(f); return true; }
 function refreshAll(){ buildCounts(); updateCount(); buildIndex(); pushData(); }
 let lastRefresh=0;
-function refreshSoon(force){ if(force || Date.now()-lastRefresh>10000){ lastRefresh=Date.now(); refreshAll(); } }
+function refreshSoon(force){   // every refresh re-tiles the whole city, so space them out as it grows
+  if(force || Date.now()-lastRefresh>Math.max(10000,FC.features.length/4)){ lastRefresh=Date.now(); refreshAll(); } }
 
 function matchPlaces(els){
   for(const el of els){
