@@ -591,6 +591,7 @@ function search(q){
   const words=norm(q.trim()).split(/\s+/).filter(Boolean), q1=words.join(" ");
   if(q1.length<2) return;
   const hits=[]; for(const r of INDEX){ if(!words.every(w=>r.low.includes(w))) continue;
+    if(!r.low.split(" | ").some(part=>words.every(w=>part.includes(w)))) continue;   // all words in one address/name, not spread over a corner building's two streets
     const k=r.low.indexOf(q1), j=k>=0?k:r.low.indexOf(words[0]); hits.push([(k>=0?0:3)+(j===0?0:r.low[j-1]===" "?1:2), r]); }
   hits.sort((a,b)=>a[0]-b[0]||a[1].text.length-b[1].text.length);
   const shown=new Set(hits.slice(0,30).map(([,r])=>r.id));
