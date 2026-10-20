@@ -914,8 +914,30 @@ async function init(){
     for(const f of saved.fc.features) addFeature(f);
     if(saved.complete){ S.savedOn=saved.savedOn; renderDataInfo(); }
     refreshAll(); toast(t("ready",{n:FC.features.length}),3000);
-    if(!saved.complete) download();          // carry on where it stopped
-  } else download();
+    if(!saved.complete && !(await loadPrebuilt())) download();   // carry on where it stopped
+  } else if(!(await loadPrebuilt())) download();
+}
+/* The whole city, prebuilt from an OpenStreetMap extract and served next to this page (data/*.json),
+   loads in seconds and doesn't depend on Overpass. Pieces nearest the view come first. */
+async function loadPrebuilt(){
+  let idx; try{ const r=await fetch("data/index.json",{cache:"no-cache"}); if(!r.ok) return false; idx=await r.json(); }catch{ return false; }
+  if(idx.v!==CACHE_VERSION || !idx.chunks?.length) return false;
+  S.loading=true; $("refresh").disabled=true; toast(t("loadingView"));
+  const m=map.getCenter(), todo=idx.chunks.slice().sort((a,b)=>Math.hypot(a.cx-m.lng,(a.cy-m.lat)*2)-Math.hypot(b.cx-m.lng,(b.cy-m.lat)*2));
+  let done=0, failed=0, first=true;
+  const one=async c=>{
+    try{ const d=await (await fetch(`data/${c.k}.json`)).json();
+      Object.assign(WIKI,d.wiki||{}); for(const f of d.features) addFeature(f); }catch(e){ failed++; console.warn("Prebuilt piece failed",c.k,e); }
+    PROGRESS=t("loadingRest",{a:Math.round(100*++done/todo.length)});
+    if(first){ first=false; refreshSoon(true); $("toast").classList.remove("show"); } else refreshSoon();
+  };
+  await one(todo.shift());                                       // the view first, on its own
+  await Promise.all([0,1,2].map(async()=>{ while(todo.length) await one(todo.shift()); }));
+  PROGRESS=""; S.loading=false; $("refresh").disabled=false;
+  if(failed){ refreshAll(); download(); return true; }           // fill the gaps from Overpass
+  DONE=new Set(idx.done); refreshAll(); await save(true);
+  S.savedOn=idx.savedOn; renderDataInfo(); toast(t("ready",{n:FC.features.length}),3000);
+  return true;
 }
 
 /* ================= measurement stations: air quality + noise ================= */

@@ -1,0 +1,37 @@
+# Rebuilds data/*.json (every building in Stockholm) from a fresh OpenStreetMap extract.
+# Runs on GitHub's servers every Monday; can also be started by hand from the Actions tab.
+name: Update building data
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install osmium==4.3.2
+      - name: Download Stockholm extract
+        run: curl -fsSL -A "hus-for-hus-build/1.0 (https://github.com/${{ github.repository }})" -o /tmp/Stockholm.osm.pbf https://download.bbbike.org/osm/bbbike/Stockholm/Stockholm.osm.pbf
+      - name: Build data/
+        run: python tools/build_buildings.py /tmp/Stockholm.osm.pbf data
+      - name: Commit if changed
+        run: |
+          git add data
+          if git diff --cached --quiet; then echo "No changes"; exit 0; fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "Update building data from OpenStreetMap"
+          git push
+          # pushes made with GITHUB_TOKEN may not start a Pages build on their own
+          curl -fsS -X POST -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/pages/builds" || true
