@@ -114,7 +114,9 @@ button,input{font:inherit;color:inherit}
 #grip::after{content:"";position:absolute;left:4px;top:50%;width:4px;height:44px;margin-top:-22px;border-radius:2px;background:rgba(20,40,55,.35);transition:background .15s}
 #grip:hover::after,#grip:focus-visible::after,#grip.drag::after{background:#2f6fed}
 #grip:focus-visible{outline:none}
-@media (min-width:900px){body:has(#aq:not([hidden])) #grip,body:has(#wl:not([hidden])) #grip{display:block}}
+@media (min-width:900px){body:has(#aq:not([hidden])) #grip,body:has(#wl:not([hidden])) #grip{display:block}
+  /* little map left beside a wide drawer: stack the buttons so they don't cover the search box */
+  body.tight:has(#aq:not([hidden])) #ctlbar,body.tight:has(#wl:not([hidden])) #ctlbar{flex-direction:column;align-items:flex-end}}
 body.resizing,body.resizing *{cursor:ew-resize!important;user-select:none}
 @media (max-width:899px){
   body:has(#aq:not([hidden])) #ctl,body:has(#wl:not([hidden])) #ctl{z-index:7;top:calc(10px + env(safe-area-inset-top,0px))}
@@ -969,9 +971,11 @@ const W_KEY="hus-for-hus-drawer-width", W_DEF=620, W_MIN=380;
 let drawerPx=W_DEF; try{ drawerPx=+localStorage.getItem(W_KEY)||W_DEF; }catch{}
 const drawerWide=()=>innerWidth>=900, DRAWER_W=()=>Math.min(drawerPx,innerWidth);
 function setDrawerW(w,save){
-  drawerPx=Math.round(Math.max(W_MIN,Math.min(w,innerWidth-200)));
+  const max=Math.max(W_DEF,innerWidth-540);      // leave room for the search box and the stacked buttons
+  drawerPx=Math.round(Math.max(W_MIN,Math.min(w,max)));
   document.documentElement.style.setProperty("--drawer-w",drawerPx+"px");
-  const g=$("grip"); g.setAttribute("aria-valuenow",drawerPx); g.setAttribute("aria-valuemin",W_MIN); g.setAttribute("aria-valuemax",innerWidth-200);
+  document.body.classList.toggle("tight",innerWidth-drawerPx<760);
+  const g=$("grip"); g.setAttribute("aria-valuenow",drawerPx); g.setAttribute("aria-valuemin",W_MIN); g.setAttribute("aria-valuemax",max);
   if(save){ try{ localStorage.setItem(W_KEY,drawerPx); }catch{}
     if(drawerWide() && (!$("aq").hidden||!$("wl").hidden)) map.easeTo({padding:{right:DRAWER_W(),left:0},duration:300}); }
 }
@@ -983,6 +987,7 @@ setDrawerW(drawerPx);
   g.addEventListener("pointerup",end); g.addEventListener("pointercancel",end);
   g.addEventListener("dblclick",()=>setDrawerW(W_DEF,true));
   g.addEventListener("keydown",e=>{ const d={ArrowLeft:40,ArrowRight:-40}[e.key]; if(d){ e.preventDefault(); setDrawerW(drawerPx+d,true); } else if(e.key==="Home"){ setDrawerW(W_DEF,true); } });
+  addEventListener("resize",()=>document.body.classList.toggle("tight",innerWidth-drawerPx<760));
 }
 
 function stationText(s){
