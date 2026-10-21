@@ -4,6 +4,12 @@ Every building in Stockholm, coloured by the year it was built, with live air qu
 
 **Live:** https://kanaaraman.github.io/hus-for-hus-air/
 
+## Requirements
+
+**None.** Open the link in any up-to-date browser (Chrome, Edge, Firefox or Safari, on a computer or a phone). There's nothing to install, no account and no setup.
+
+The only optional extra is the AI questions in **Air & noise**, which need [Ollama](https://ollama.com) on your own computer. The page shows the steps for your system under **Air & noise → Ollama settings**. See also [Using the AI questions](#using-the-ai-questions).
+
 The whole app is one HTML file (`index.html`) with no build step and no server of its own. It runs in the browser and talks directly to open data services.
 
 ## What it does
@@ -39,15 +45,19 @@ Years come from OpenStreetMap tags (`start_date`, `building:start_date`, `constr
 
 ## Using the AI questions
 
-1. Install [Ollama](https://ollama.com) and pull a model, for example `ollama pull qwen2.5:7b`.
-2. Allow this site to talk to Ollama. On Windows:
-   ```
-   setx OLLAMA_ORIGINS "https://kanaaraman.github.io,http://localhost,http://127.0.0.1"
-   ```
-   Then restart Ollama.
-3. Open **Air & noise**, choose the model under *Ollama settings* and ask a question.
+This part is optional and needs a computer (not a phone). Answers come from a model running on your own machine; nothing is sent to an AI service.
 
-Visitors who don't run Ollama simply don't get this feature; the rest of the app works without it. Some browsers ask for permission before a website can reach `localhost`, and some ad blockers block it.
+1. Install Ollama from [ollama.com/download](https://ollama.com/download) and open it.
+2. Get a model: `ollama pull qwen2.5:7b` (about 4.7 GB), or the smaller `ollama pull llama3.2:3b` (about 2 GB).
+3. Let the site talk to Ollama (one time):
+   - **Windows** (PowerShell): `setx OLLAMA_ORIGINS "https://kanaaraman.github.io"`, then quit Ollama from the tray icon and start it again.
+   - **macOS** (Terminal): `launchctl setenv OLLAMA_ORIGINS "https://kanaaraman.github.io"`, then quit and reopen the Ollama app.
+   - **Linux**: `sudo systemctl edit ollama`, add `Environment="OLLAMA_ORIGINS=https://kanaaraman.github.io"` under `[Service]`, then `sudo systemctl restart ollama`.
+
+   If you have already allowed other sites, list them all, separated by commas.
+4. Open **Air & noise → Ollama settings** and click **Reconnect**. If your browser asks to let the site use devices on your local network, choose **Allow**. Some ad blockers block this connection.
+
+The page shows these same steps, filled in for your system, under **Air & noise → Ollama settings**.
 
 ## Repository layout
 

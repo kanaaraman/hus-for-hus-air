@@ -205,6 +205,10 @@ button,input{font:inherit;color:inherit}
 #aq .oset input,#aq .oset select{border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:8px;padding:5px 8px;font-size:13px}
 #aq #aq-olStatus.ok{color:#2b8a3e}
 #aq #aq-olStatus.bad{color:var(--warn)}
+#aq .olhelp{margin-top:8px;font-size:13px}
+#aq .olhelp ol{margin:4px 0 0;padding-left:20px}
+#aq .olhelp li{margin:4px 0}
+#aq .olhelp code{display:inline-block;max-width:100%;overflow-x:auto;white-space:pre;vertical-align:bottom;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:1px 6px;user-select:all}
 #aq .ctx{white-space:pre-wrap;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px;margin-top:6px;max-height:220px;overflow:auto}
 #aq .load{margin-top:14px;font-size:13px;color:var(--muted)}
 #aq .load label{display:inline-block;margin-top:6px;border:1px dashed var(--line);padding:8px 12px;border-radius:10px;cursor:pointer;color:var(--text);background:var(--card)}
@@ -352,7 +356,7 @@ button,input{font:inherit;color:inherit}
     <details class="oset" id="aq-ctxBox" hidden><summary>Data sent to the model</summary><div class="ctx" id="aq-ctxText"></div></details>
     <details class="oset"><summary>Ollama settings · <span id="aq-olStatus">not checked</span></summary>
       <div class="row">URL <input id="aq-olUrl" size="24"> Model <select id="aq-olModel"></select> <button class="chip" id="aq-olRefresh">Reconnect</button></div>
-      <div style="margin-top:6px">Needs Ollama running locally (<code>ollama serve</code>). If this page is hosted on a website rather than opened from your computer, start Ollama with <code>OLLAMA_ORIGINS="https://your-site"</code> so the browser is allowed to call it.</div>
+      <div id="aq-olHelp" class="olhelp"></div>
     </details>
   </div>
   <div class="load">
@@ -1647,6 +1651,24 @@ function fmtAns(t){
   return e.replace(/^#{1,4}\s*(.+)$/gm,'<strong>$1</strong>').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/^\s*[-*]\s+/gm,'• ');
 }
 let OLWHY='';
+/* Everything else on the page needs nothing installed. The AI questions need Ollama on the visitor's own
+   computer, and a hosted page must be allowed to call it: show the steps for this visitor's system and page. */
+function renderOlHelp(){
+  const ua=navigator.userAgentData?.platform||navigator.userAgent, os=/win/i.test(ua)?'win':/mac|iphone|ipad/i.test(ua)?'mac':'linux';
+  const o=location.origin, hosted=/^https?:/.test(o) && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|$)/.test(o);
+  const c=s=>'<code>'+esc(s)+'</code>';
+  const allow={
+    win:'In PowerShell run '+c('setx OLLAMA_ORIGINS "'+o+'"')+', then quit Ollama (tray icon → Quit) and start it again.',
+    mac:'In Terminal run '+c('launchctl setenv OLLAMA_ORIGINS "'+o+'"')+', then quit the Ollama app and open it again.',
+    linux:'Run '+c('sudo systemctl edit ollama')+', add '+c('[Service]\nEnvironment="OLLAMA_ORIGINS='+o+'"')+', then '+c('sudo systemctl restart ollama')+'.'
+  }[os];
+  $('aq-olHelp').innerHTML='Optional. Answers come from a model running on your own computer with Ollama; nothing is sent to an AI service. Works on a computer, not on a phone.'
+    +'<ol><li>Install Ollama from <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com/download</a> and open it.</li>'
+    +'<li>Get a model: '+c('ollama pull qwen2.5:7b')+' (about 4.7 GB), or the smaller '+c('ollama pull llama3.2:3b')+' (about 2 GB).</li>'
+    +(hosted?'<li>Let this page talk to Ollama (one time). '+allow+' Already set it for other sites? Separate them with commas.</li>':'')
+    +'<li>Click <b>Reconnect</b>. If your browser asks to let this site use devices on your local network, choose <b>Allow</b>.</li></ol>';
+}
+renderOlHelp();
 async function fetchTags(u){const r=await fetch(u.replace(/\/+$/,'')+'/api/tags');if(!r.ok)throw new Error('HTTP '+r.status);return ((await r.json()).models||[]).map(m=>m.name)}
 async function loadModels(){
   const sel=$('aq-olModel'),st=$('aq-olStatus');let names=null;
@@ -1665,9 +1687,8 @@ async function loadModels(){
   else{
     // A no-cors request resolves whenever the server answers, even if the browser then hides the reply.
     let reach=false;try{await fetch(OL.url.replace(/\/+$/,'')+'/',{mode:'no-cors'});reach=true}catch(_){}
-    if(reach){OLWHY='Ollama is running, but it is rejecting requests from this page (page origin: "'+location.origin+'"). Fix: quit Ollama (tray icon → Quit), run  setx OLLAMA_ORIGINS "*"  in PowerShell, then start Ollama again from the Start menu.';st.textContent='running, but blocked for this page (CORS)'}
-    else{OLWHY='Ollama is not reachable at '+OL.url+'. Start the Ollama app (or run ollama serve), and check the URL in these settings.';st.textContent='cannot reach Ollama'}
-  }
+    if(reach){OLWHY='Ollama is running, but it is not allowed to answer this page ('+location.origin+'). Follow step 3 under "Ollama settings" below, then click Reconnect.';st.textContent='running, but blocked for this page'}
+    else{OLWHY='Ollama is not reachable at '+OL.url+'. If you want AI answers, follow the steps under "Ollama settings" below. Everything else on this page works without it.';st.textContent='not installed or not running'}  }
   st.className='bad';return false;
 }
 let ctl=null;
@@ -1678,7 +1699,7 @@ async function ask(q){
   $('aq-q').value=q;const ans=$('aq-ans');ans.textContent='';setStep(0);
   const chat=smallTalk(q);
   if(chat){$('aq-verdict').hidden=true;$('aq-ctxBox').hidden=true;ans.textContent=chat;setStep(STEPS.length);return}
-  if(!OL.model&&!(await loadModels())){ans.textContent='Could not use Ollama.\n\n'+OLWHY;return}
+  if(!OL.model&&!(await loadModels())){ans.textContent='Could not use Ollama.\n\n'+OLWHY;$('aq-olHelp').closest('details').open=true;return}
   setStep(1);
   const focus=/pm\s?-?10|particl|particul|dust|damm/i.test(q)?'PM10':/no2|no₂|nitrogen|kvävedioxid/i.test(q)?'NO2':(cur==='Noise'?(DATA.NO2?'NO2':Object.keys(DATA)[0]||'NO2'):cur);
   const trendQ=isTrendQ(q),yrs=trendQ?askedYears(q):null;
