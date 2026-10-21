@@ -104,11 +104,18 @@ button,input{font:inherit;color:inherit}
 
 /* ---------- air-quality drawer ---------- */
 .night #aq{--bg:#0e1116;--card:#171b22;--text:#e8ecf2;--muted:#98a2b3;--line:#262c36;--accent:#6b9bff;--warn:#ff8a4c;--grid:rgba(255,255,255,.08);color-scheme:dark}
-#aq{position:fixed;top:0;right:0;bottom:0;width:min(620px,100vw);z-index:6;overflow:auto;overscroll-behavior:contain;
+#aq{position:fixed;top:0;right:0;bottom:0;width:min(var(--drawer-w,620px),100vw);z-index:6;overflow:auto;overscroll-behavior:contain;
   container-type:inline-size;box-shadow:-8px 0 30px rgba(20,40,55,.25);padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 #aq[hidden]{display:none}
 /* keep the top-right buttons reachable while the air/noise or water drawer is open */
-@media (min-width:900px){body:has(#aq:not([hidden])) #ctl,body:has(#wl:not([hidden])) #ctl{right:calc(min(620px,100vw) + 12px)}}
+@media (min-width:900px){body:has(#aq:not([hidden])) #ctl,body:has(#wl:not([hidden])) #ctl{right:calc(min(var(--drawer-w,620px),100vw) + 12px)}}
+/* drag the drawer's left edge to change its width (wide screens only; phones get the full width) */
+#grip{position:fixed;top:0;bottom:0;right:calc(min(var(--drawer-w,620px),100vw) - 6px);width:12px;z-index:7;cursor:ew-resize;touch-action:none;display:none}
+#grip::after{content:"";position:absolute;left:4px;top:50%;width:4px;height:44px;margin-top:-22px;border-radius:2px;background:rgba(20,40,55,.35);transition:background .15s}
+#grip:hover::after,#grip:focus-visible::after,#grip.drag::after{background:#2f6fed}
+#grip:focus-visible{outline:none}
+@media (min-width:900px){body:has(#aq:not([hidden])) #grip,body:has(#wl:not([hidden])) #grip{display:block}}
+body.resizing,body.resizing *{cursor:ew-resize!important;user-select:none}
 @media (max-width:899px){
   body:has(#aq:not([hidden])) #ctl,body:has(#wl:not([hidden])) #ctl{z-index:7;top:calc(10px + env(safe-area-inset-top,0px))}
   #aq,#wl{top:calc(56px + env(safe-area-inset-top,0px))!important;padding-top:0!important}
@@ -216,7 +223,7 @@ button,input{font:inherit;color:inherit}
 #aq #aq-msg{margin-top:6px}
 
 /* ---------- water panel ---------- */
-#wl{position:fixed;top:0;right:0;bottom:0;width:min(620px,100vw);z-index:6;overflow:auto;overscroll-behavior:contain;
+#wl{position:fixed;top:0;right:0;bottom:0;width:min(var(--drawer-w,620px),100vw);z-index:6;overflow:auto;overscroll-behavior:contain;
   background:var(--wl-bg);color:var(--ink);box-shadow:-8px 0 30px rgba(20,40,55,.25);padding:calc(10px + env(safe-area-inset-top,0px)) 18px calc(18px + env(safe-area-inset-bottom,0px))}
 :root{--wl-bg:#f4f7f8;--wl-card:#fff}
 @media (prefers-color-scheme:dark){:root{--wl-bg:#12181d;--wl-card:#1a2229}}
@@ -297,6 +304,7 @@ button,input{font:inherit;color:inherit}
   <div id="count"></div>
 </div>
 <div id="toast" class="panel" role="status"></div>
+<div id="grip" role="separator" aria-orientation="vertical" aria-label="Resize panel" title="Drag to resize · double-click to reset" tabindex="0"></div>
 <aside id="wl" hidden aria-labelledby="wl-title">
   <div class="wl-top"><h2 id="wl-title"></h2><button id="wl-close" aria-label="Close">×</button></div>
   <div id="wl-body"></div>
@@ -956,7 +964,26 @@ const STATIONS=[
 const POS_KEY="hus-for-hus-station-positions";
 let SAVED_POS={}; try{ SAVED_POS=JSON.parse(localStorage.getItem(POS_KEY)||"{}"); }catch{}
 STATIONS.forEach(s=>{ s.pos = SAVED_POS[s.id] ? "placed" : "approx"; if(SAVED_POS[s.id]) s.ll=SAVED_POS[s.id]; });
-const drawerWide=()=>innerWidth>=900, DRAWER_W=()=>Math.min(620,innerWidth);
+/* drawer width: dragged by the left edge (#grip), remembered on this device */
+const W_KEY="hus-for-hus-drawer-width", W_DEF=620, W_MIN=380;
+let drawerPx=W_DEF; try{ drawerPx=+localStorage.getItem(W_KEY)||W_DEF; }catch{}
+const drawerWide=()=>innerWidth>=900, DRAWER_W=()=>Math.min(drawerPx,innerWidth);
+function setDrawerW(w,save){
+  drawerPx=Math.round(Math.max(W_MIN,Math.min(w,innerWidth-200)));
+  document.documentElement.style.setProperty("--drawer-w",drawerPx+"px");
+  const g=$("grip"); g.setAttribute("aria-valuenow",drawerPx); g.setAttribute("aria-valuemin",W_MIN); g.setAttribute("aria-valuemax",innerWidth-200);
+  if(save){ try{ localStorage.setItem(W_KEY,drawerPx); }catch{}
+    if(drawerWide() && (!$("aq").hidden||!$("wl").hidden)) map.easeTo({padding:{right:DRAWER_W(),left:0},duration:300}); }
+}
+setDrawerW(drawerPx);
+{ const g=$("grip");
+  g.addEventListener("pointerdown",e=>{ e.preventDefault(); g.setPointerCapture(e.pointerId); g.classList.add("drag"); document.body.classList.add("resizing"); });
+  g.addEventListener("pointermove",e=>{ if(g.hasPointerCapture(e.pointerId)) setDrawerW(innerWidth-e.clientX); });
+  const end=e=>{ if(!g.classList.contains("drag")) return; g.classList.remove("drag"); document.body.classList.remove("resizing"); setDrawerW(drawerPx,true); };
+  g.addEventListener("pointerup",end); g.addEventListener("pointercancel",end);
+  g.addEventListener("dblclick",()=>setDrawerW(W_DEF,true));
+  g.addEventListener("keydown",e=>{ const d={ArrowLeft:40,ArrowRight:-40}[e.key]; if(d){ e.preventDefault(); setDrawerW(drawerPx+d,true); } else if(e.key==="Home"){ setDrawerW(W_DEF,true); } });
+}
 
 function stationText(s){
   if(s.kind==="air"){
